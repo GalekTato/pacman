@@ -132,10 +132,10 @@ def init():
         g.loadTextures(textures, i + 2)
 
 def _lookat():
-    ex = radius*(math.cos(math.radians(theta)) + math.sin(math.radians(theta))) + CENTER_X
-    ez = radius*(-math.sin(math.radians(theta)) + math.cos(math.radians(theta))) + CENTER_Z
     glLoadIdentity()
-    gluLookAt(ex, EYE_Y, ez, CENTER_X, CENTER_Y, CENTER_Z, 0, 1, 0)
+    # Cámara estática desde arriba (Top-Down) para simular el 2D original
+    # gluLookAt(eyeX, eyeY, eyeZ,   centerX, centerY, centerZ,   upX, upY, upZ)
+    gluLookAt(200.0, 420.0, 200.0,   200.0,   0.0,   200.0,   0.0, 0.0, -1.0)
 
 # ──────────────────────────────────────────────────
 #  HUD  (pygame 2D sobre OpenGL, sin glDrawPixels)
@@ -282,8 +282,8 @@ while not done:
 
     keys = pygame.key.get_pressed()
 
-    if keys[K_RIGHT]: theta = (theta + 1.0) % 360; _lookat()
-    if keys[K_LEFT]:  theta = (theta - 1.0) % 360; _lookat()
+    #if keys[K_RIGHT]: theta = (theta + 1.0) % 360; _lookat()
+    #if keys[K_LEFT]:  theta = (theta - 1.0) % 360; _lookat()
 
     if not paused:
         # Pacman
@@ -293,11 +293,10 @@ while not done:
         elif keys[K_a]: pc.update(3)
         else:           pc.update(-1)
 
-        # Fantasmas cada 2 frames (velocidad razonable)
-        if frame % 2 == 0:
-            for g in ghosts:
-                pm = get_partner_mc(g) if g.tipo in (2, 3) else None
-                g.update2(pc.position, partner_mc=pm)
+        # Fantasmas: Lógica de persecución en tiempo real
+        for g in ghosts:
+            pm = get_partner_mc(g) if g.tipo in (2, 3) else None
+            g.update2(pc.position, partner_mc=pm)
 
         if check_collision():
             flash = 45

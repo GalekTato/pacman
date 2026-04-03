@@ -22,7 +22,6 @@ _OPTIONS = {
 _INV   = {0: 2, 1: 3, 2: 0, 3: 1}
 _DELTA = {0: (0, -1), 1: (1, 0), 2: (0, 1), 3: (-1, 0)}
 
-
 class Ghost:
     def __init__(self, mapa, mc, x_mc, y_mc, xini, yini, direction, tipo):
         self.MC       = mc
@@ -65,16 +64,26 @@ class Ghost:
     def _apply_dir(self, d):
         self._prev_pos = list(self.position)
         dx, dz = _DELTA[d]
-        self.position[0] += dx
-        self.position[2] += dz
-        self.direction = d
+        nx = self.position[0] + dx
+        nz = self.position[2] + dz
+        
+        # Validación estricta para no salir del arreglo
+        if 0 <= nx - 20 < len(self.XPxToMC) and 0 <= nz - 20 < len(self.YPxToMC):
+            self.position[0] = nx
+            self.position[2] = nz
+            self.direction = d
         self._lerp_t = 0.0
 
     def _continue(self):
         self._prev_pos = list(self.position)
         dx, dz = _DELTA[self.direction]
-        self.position[0] += dx
-        self.position[2] += dz
+        nx = self.position[0] + dx
+        nz = self.position[2] + dz
+        
+        # Validación estricta para no salir del arreglo
+        if 0 <= nx - 20 < len(self.XPxToMC) and 0 <= nz - 20 < len(self.YPxToMC):
+            self.position[0] = nx
+            self.position[2] = nz
         self._lerp_t = 0.0
 
     def _cell_options(self):
@@ -102,26 +111,21 @@ class Ghost:
             self._continue(); return
         self._apply_dir(random.choice(opts))
 
-    # ------------------------------------------------------------------ funciones eval
+# ------------------------------------------------------------------ funciones eval
     def _eval_pinky(self, ghost_mc, _partner_mc, pacman_mc):
-        """
-        Componente 1: distancia Manhattan normalizada (0..1).
-        Componente 2: alineacion de eje (+0.25 si mismo row o col).
-        """
         dist = manhattan(ghost_mc, pacman_mc)
         c1   = 1.0 - min(dist / 13.0, 1.0)
         c2   = 0.25 if (ghost_mc[0] == pacman_mc[0] or
                         ghost_mc[1] == pacman_mc[1]) else 0.0
-        return c1 + c2
+                        
+        # MEJORA (Ruptura de simetría): Ruido minúsculo para evitar rutas idénticas
+        c3   = random.uniform(0.0, 0.02)
+        return c1 + c2 + c3
 
     def _eval_collab(self, ghost_mc, partner_mc, pacman_mc):
-        """
-        Componente 1: distancia individual normalizada.
-        Componente 2: formacion de pinza (coseno opuesto = cerco perfecto).
-        Componente 3: separacion minima entre los dos fantasmas.
-        """
         dist = manhattan(ghost_mc, pacman_mc)
         c1   = 1.0 - min(dist / 13.0, 1.0)
+        
         if partner_mc is not None:
             gx, gy = ghost_mc;  px, py = pacman_mc;  qx, qy = partner_mc
             v1 = (px - gx, py - gy);  v2 = (px - qx, py - qy)
@@ -129,10 +133,19 @@ class Ghost:
             m2 = math.sqrt(v2[0]**2 + v2[1]**2) + 1e-9
             cos_a = (v1[0]*v2[0] + v1[1]*v2[1]) / (m1 * m2)
             c2 = 0.35 * (-cos_a)
-            c3 = 0.15 * min(manhattan(ghost_mc, partner_mc) / 6.0, 1.0)
+            
+            dist_partner = manhattan(ghost_mc, partner_mc)
+            # MEJORA (Anti-Traslape): Castigo drástico si intentan fusionarse en la misma celda
+            if dist_partner == 0:
+                c3 = -5.0 
+            else:
+                c3 = 0.15 * min(dist_partner / 6.0, 1.0)
         else:
             c2 = c3 = 0.0
-        return c1 + c2 + c3
+            
+        # MEJORA (Ruptura de simetría): Evita que Inky y Clyde piensen exactamente igual
+        c4 = random.uniform(0.0, 0.02)
+        return c1 + c2 + c3 + c4
 
     # ------------------------------------------------------------------ alfa-beta
     def _get_dirs_mc(self, mc_pos, came_from):
@@ -153,12 +166,6 @@ class Ghost:
                   ghost_mc, pacman_mc, partner_mc,
                   came_from, branch_visited, eval_fn,
                   quiescence_used=False):
-        """
-        Poda Alfa-Beta con:
-        1. Tabu de rama (branch_visited): evita ciclos dentro de la busqueda.
-        2. Busqueda ambiciosa: ordena movimientos por heuristica antes de expandir.
-        3. Continuacion heuristica: si dist<=3 y depth==0, extiende un nivel (una vez).
-        """
         if ghost_mc in branch_visited:
             return eval_fn(ghost_mc, partner_mc, pacman_mc)
 
@@ -173,9 +180,7 @@ class Ghost:
         if not dirs:
             return eval_fn(ghost_mc, partner_mc, pacman_mc)
 
-        # Busqueda ambiciosa: ordenar por heuristica descendente
         dirs.sort(key=lambda d: -eval_fn(self._sim(ghost_mc, d), partner_mc, pacman_mc))
-
         new_vis = branch_visited | {ghost_mc}
 
         if maximizing:
@@ -225,7 +230,6 @@ class Ghost:
             if v > best_val:
                 best_val = v;  best_d = d
 
-        # Actualizar tabu global
         self._tabu.append(ghost_mc)
         if len(self._tabu) > self._TABU_SIZE:
             self._tabu.pop(0)
@@ -262,7 +266,6 @@ class Ghost:
         else:
             self._continue()
 
-        # Interpolacion suave (doble buffer)
         self._lerp_t = min(self._lerp_t + 0.3, 1.0)
         for i in (0, 2):
             self.render_pos[i] = (self._prev_pos[i] * (1.0 - self._lerp_t) +

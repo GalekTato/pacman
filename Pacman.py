@@ -1,5 +1,5 @@
 """
-Pacman.py  –  Pacman con interpolacion suave de movimiento.
+Pacman.py  –  Pacman con interpolacion suave de movimiento y buffer de entrada.
 """
 from OpenGL.GL import *
 
@@ -15,6 +15,7 @@ class Pacman:
             self.YPxToMC[self.position[2] - 20],
         ]
         self.direction = 1   # derecha
+        self.next_direction = 1 # Buffer de intención del jugador
         self.start     = 1
 
         # Doble buffer de posicion
@@ -26,9 +27,18 @@ class Pacman:
         self.texturas = texturas
         self.Id = id
 
+    def _move_forward(self, d):
+        if d == 0:   self.position[2] -= 1
+        elif d == 1: self.position[0] += 1
+        elif d == 2: self.position[2] += 1
+        elif d == 3: self.position[0] -= 1
+
     def update(self, dir):
         self._prev_pos = [float(self.position[0]), 1.0, float(self.position[2])]
         moved = False
+
+        if dir != -1:
+            self.next_direction = dir  # Guardar la tecla presionada
 
         in_inter = (self.YPxToMC[self.position[2]-20] != -1 and
                     self.XPxToMC[self.position[0]-20] != -1)
@@ -39,41 +49,39 @@ class Pacman:
             cell = self.MC[self.positionMC[1]][self.positionMC[0]]
 
             if cell == 0:          # falsa interseccion: sigue recto
-                if self.direction == 0: self.position[2] -= 1
-                elif self.direction==1: self.position[0] += 1
-                elif self.direction==2: self.position[2] += 1
-                else:               self.position[0] -= 1
+                self._move_forward(self.direction)
                 moved = True
             else:
-                if dir == -1 and self.start != 1:
-                    dir = self.direction
-
                 can = {
                     0: cell in (12,13,22,23,24,25),
                     1: cell in (10,12,21,23,24,25,26),
                     2: cell in (10,11,21,22,24,25),
                     3: cell in (11,13,21,22,23,25,27),
                 }
-                if dir in can and can[dir]:
-                    self.direction = dir
-                    if dir==0: self.position[2] -= 1
-                    elif dir==1: self.position[0] += 1
-                    elif dir==2: self.position[2] += 1
-                    else:        self.position[0] -= 1
+                
+                # 1. Intentar girar hacia la dirección guardada
+                if self.next_direction in can and can[self.next_direction]:
+                    self.direction = self.next_direction
+                    self._move_forward(self.direction)
+                    self.start = 0
+                    moved = True
+                # 2. Si no puede girar, intenta seguir su camino
+                elif self.direction in can and can[self.direction]:
+                    self._move_forward(self.direction)
                     self.start = 0
                     moved = True
         else:
+            # Permitir dar la vuelta en U en cualquier momento
             inv = {0:2,1:3,2:0,3:1}
-            if dir == inv.get(self.direction, -1):
-                self.direction = dir
-            if self.direction==0: self.position[2] -= 1
-            elif self.direction==1: self.position[0] += 1
-            elif self.direction==2: self.position[2] += 1
-            else:                   self.position[0] -= 1
+            if self.next_direction == inv.get(self.direction, -1):
+                self.direction = self.next_direction
+            
+            self._move_forward(self.direction)
             moved = True
 
         if moved:
             self._lerp_t = 0.0
+            
         self._lerp_t = min(self._lerp_t + 0.3, 1.0)
         for i in (0, 2):
             self.render_pos[i] = (self._prev_pos[i]*(1-self._lerp_t) +
