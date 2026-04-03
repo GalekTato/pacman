@@ -1,287 +1,315 @@
+"""
+main.py  –  Pac-Man con Poda Alfa-Beta
+Corregido: posiciones reales en el laberinto, HUD ligero, camara ajustada.
+"""
+
 import pygame
 from pygame.locals import *
-
-# Cargamos las bibliotecas de OpenGL
 from OpenGL.GL import *
 from OpenGL.GLU import *
-from OpenGL.GLUT import *
+import math, os, sys, numpy as np, pandas as pd
 
-import math
-import os
-import numpy as np
-import pandas as pd
-
-# Se carga el archivo de la clase Cubo
-import sys
-sys.path.append('..')
+sys.path.append('.')
 from Pacman import Pacman
-from Ghost import Ghost
+from Ghost  import Ghost
 
+# ──────────────────────────────────────────────────
+#  PANTALLA
+# ──────────────────────────────────────────────────
+W, H = 1000, 800
+FOVY, ZNEAR, ZFAR = 60.0, 0.01, 1200.0
 
-screen_width = 900
-screen_height = 800
-#vc para el obser.
-FOVY=60.0
-ZNEAR=0.01
-ZFAR=900.0
-#Variables para definir la posicion del observador
-#gluLookAt(EYE_X,EYE_Y,EYE_Z,CENTER_X,CENTER_Y,CENTER_Z,UP_X,UP_Y,UP_Z)
-EYE_X = 300.0 + 200.0
-EYE_Y = 200.0
-EYE_Z = 300.0 + 200.0
-CENTER_X = 0 + 200
-CENTER_Y = 0
-CENTER_Z = 0 + 200
-UP_X=0
-UP_Y=1
-UP_Z=0
-#Variables para dibujar los ejes del sistema
-X_MIN=-500
-X_MAX=500
-Y_MIN=-500
-Y_MAX=500
-Z_MIN=-500
-Z_MAX=500
-#Dimension del plano
 DimBoard = 400
-#Variables para el control del observador
-theta = 0.0
-radius = 300
+CENTER_X, CENTER_Y, CENTER_Z = 200.0, 0.0, 200.0
+EYE_Y = 380.0
+theta  = 0.0
+radius = 480.0
 
-
-#Arreglo para el manejo de texturas
 textures = []
-#Nombre de los archivos a usar
-BASE_PATH = os.path.abspath(os.path.dirname(__file__))
-file_1 = os.path.join(BASE_PATH, 'mapa.bmp')
-img_pacman = os.path.join(BASE_PATH, 'pacman.bmp')
-img_ghost1 = os.path.join(BASE_PATH, 'fantasma1.bmp')
-img_ghost2 = os.path.join(BASE_PATH, 'fantasma2.bmp')
-img_ghost3 = os.path.join(BASE_PATH, 'fantasma3.bmp')
-img_ghost4 = os.path.join(BASE_PATH, 'fantasma4.bmp')
 
+BASE  = os.path.abspath(os.path.dirname(__file__))
+f_map     = os.path.join(BASE, 'mapa.bmp')
+f_pacman  = os.path.join(BASE, 'pacman.bmp')
+f_ghost   = [os.path.join(BASE, f'fantasma{i}.bmp') for i in range(1,5)]
+f_csv     = os.path.join(BASE, 'mapa.csv')
 
-file_csv = os.path.join(BASE_PATH, 'mapa.csv')
-matrix = np.array(pd.io.parsers.read_csv(file_csv, header=None)).astype("int")
-zmatrix = len(matrix)
-xmatrix = len(matrix[0])
+matrix = np.array(pd.read_csv(f_csv, header=None)).astype("int")
 
-
-#Arreglos para imprimir intersecciones en el mapa del pacman
-zarray = [-180 + 200, -128 + 200, -90 + 200, -50 + 200, -12 + 200, 28 + 200, 64 + 200, 102 + 200, 140 + 200, 180 + 200]
-xarray = [-180 + 200, -150 + 200, -108 + 200, -65 + 200, -22 + 200, 21 + 200, 64 + 200, 107 + 200, 149 + 200, 178 + 200]
-
-#Matriz de Control para mapeo entre pixeles <-> coord donde se localizan esquinas
+# ──────────────────────────────────────────────────
+#  MATRIZ DE CONTROL  (10×10)
+# ──────────────────────────────────────────────────
 MC = [
-    [10,0,21,0,11,10,0,21,0,11],
-    [24,0,25,21,23,23,21,25,0,22],
-    [12,0,22,12,11,10,13,24,0,13],
-    [0,0,0,10,23,23,11,0,0,0],
-    [26,0,25,22,0,0,24,25,0,27],
-    [0,0,0,24,0,0,22,0,0,0],
-    [10,0,25,23,11,10,23,25,0,11],
+    [10, 0,21, 0,11,10, 0,21, 0,11],
+    [24, 0,25,21,23,23,21,25, 0,22],
+    [12, 0,22,12,11,10,13,24, 0,13],
+    [ 0, 0, 0,10,23,23,11, 0, 0, 0],
+    [26, 0,25,22, 0, 0,24,25, 0,27],
+    [ 0, 0, 0,24, 0, 0,22, 0, 0, 0],
+    [10, 0,25,23,11,10,23,25, 0,11],
     [12,11,24,21,23,23,21,22,10,13],
     [10,23,13,12,11,10,13,12,23,11],
-    [12,0,0,0,23,23,0,0,0,13]
+    [12, 0, 0, 0,23,23, 0, 0, 0,13],
 ]
 
-xMC = [0,30,71,114,156,199,242,286,328,358]
-
-#XPxToMC = np.zeros((359,), dtype=int)
 XPxToMC = np.full(359, -1, dtype=int)
-XPxToMC[0] = 0
-XPxToMC[30] = 1
-XPxToMC[71] = 2
-XPxToMC[114] = 3
-XPxToMC[156] = 4
-XPxToMC[199] = 5
-XPxToMC[242] = 6
-XPxToMC[286] = 7
-XPxToMC[328] = 8
-XPxToMC[358] = 9
- 
-yMC = [0,51,90,130,168,208,244,282,320,360]
-#YPxToMC = np.zeros((361,), dtype=int)
+for idx, v in zip([0,30,71,114,156,199,242,286,328,358], range(10)):
+    XPxToMC[idx] = v
+
 YPxToMC = np.full(361, -1, dtype=int)
-YPxToMC[0] = 0
-YPxToMC[51] = 1
-YPxToMC[90] = 2
-YPxToMC[130] = 3
-YPxToMC[168] = 4
-YPxToMC[208] = 5
-YPxToMC[244] = 6
-YPxToMC[282] = 7
-YPxToMC[320] = 8
-YPxToMC[360] = 9
+for idx, v in zip([0,51,90,130,168,208,244,282,320,360], range(10)):
+    YPxToMC[idx] = v
 
-#pathfinding variables
-path = []
-grid = []
-
-#pacman object
+# ──────────────────────────────────────────────────
+#  POSICIONES DE INICIO  (offset +20, sobre intersecciones reales)
+#  pixel(col, row) → position_x = col+20, position_z = row+20
+#
+#  Pacman      → MC(0,0)  pixel(0,0)    → pos(20,20)    dir→derecha
+#  Blinky(0)   → MC(9,9)  pixel(358,360)→ pos(378,380)  dir→arriba
+#  Pinky (1)   → MC(9,0)  pixel(358,0)  → pos(378,20)   dir→abajo
+#  Inky  (2)   → MC(0,9)  pixel(0,360)  → pos(20,380)   dir→arriba
+#  Clyde (3)   → MC(0,7)  pixel(0,282)  → pos(20,302)   dir→derecha
+# ──────────────────────────────────────────────────
 pc = Pacman(matrix, MC, XPxToMC, YPxToMC)
-#fantasmas
-ghosts = []
-ghosts.append(Ghost(matrix, MC, XPxToMC, YPxToMC, 378, 380, 2, 0))
-ghosts.append(Ghost(matrix, MC, XPxToMC, YPxToMC, 378, 20, 0, 0))
-ghosts.append(Ghost(matrix, MC, XPxToMC, YPxToMC, 20, 380, 3, 0))
-ghosts.append(Ghost(matrix, MC, XPxToMC, YPxToMC, 20, 380, 3, 0))
 
+ghosts = [
+    Ghost(matrix, MC, XPxToMC, YPxToMC, 378, 380, 0, 0),   # Blinky  rojo
+    Ghost(matrix, MC, XPxToMC, YPxToMC, 378,  20, 2, 1),   # Pinky   rosa
+    Ghost(matrix, MC, XPxToMC, YPxToMC,  20, 380, 0, 2),   # Inky    cian
+    Ghost(matrix, MC, XPxToMC, YPxToMC,  20, 302, 1, 3),   # Clyde   naranja
+]
+ghosts[2].set_partner(ghosts[3])
+ghosts[3].set_partner(ghosts[2])
 
+# ──────────────────────────────────────────────────
+#  ESTADO
+# ──────────────────────────────────────────────────
+paused    = False
+show_info = True
+flash     = 0          # frames de flash al colision
+frame     = 0
+
+NAMES = {0:"Blinky (aleatorio)", 1:"Pinky (alfa-beta)",
+         2:"Inky (colaborativo)", 3:"Clyde (colaborativo)"}
+
+# ──────────────────────────────────────────────────
+#  OPENGL / PYGAME
+# ──────────────────────────────────────────────────
 pygame.init()
+font = pygame.font.SysFont("Consolas", 15, bold=True)
 
-def Axis():
-    glShadeModel(GL_FLAT)
-    glLineWidth(3.0)
-    #X axis in red
-    glColor3f(1.0,0.0,0.0)
-    glBegin(GL_LINES)
-    glVertex3f(X_MIN,0.0,0.0)
-    glVertex3f(X_MAX,0.0,0.0)
-    glEnd()
-    #Y axis in green
-    glColor3f(0.0,1.0,0.0)
-    glBegin(GL_LINES)
-    glVertex3f(0.0,Y_MIN,0.0)
-    glVertex3f(0.0,Y_MAX,0.0)
-    glEnd()
-    #Z axis in blue
-    glColor3f(0.0,0.0,1.0)
-    glBegin(GL_LINES)
-    glVertex3f(0.0,0.0,Z_MIN)
-    glVertex3f(0.0,0.0,Z_MAX)
-    glEnd()
-    glLineWidth(1.0)
-
-def Texturas(filepath):
+def load_tex(path):
     textures.append(glGenTextures(1))
-    id = len(textures) - 1
-    glBindTexture(GL_TEXTURE_2D, textures[id])
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S, GL_CLAMP)
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T, GL_CLAMP)
+    idx = len(textures) - 1
+    glBindTexture(GL_TEXTURE_2D, textures[idx])
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-    image = pygame.image.load(filepath).convert()
-    w, h = image.get_rect().size
-    image_data = pygame.image.tostring(image,"RGBA")
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image_data)
-    glGenerateMipmap(GL_TEXTURE_2D) 
-    
-def Init():
-    screen = pygame.display.set_mode(
-        (screen_width, screen_height), DOUBLEBUF | OPENGL)
-    pygame.display.set_caption("OpenGL: cubos")
+    img  = pygame.image.load(path).convert()
+    w, h = img.get_rect().size
+    data = pygame.image.tostring(img, "RGBA")
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
+    glGenerateMipmap(GL_TEXTURE_2D)
 
-    glMatrixMode(GL_PROJECTION)
-    glLoadIdentity()
-    gluPerspective(FOVY, screen_width/screen_height, ZNEAR, ZFAR)
+def init():
+    pygame.display.set_mode((W, H), DOUBLEBUF | OPENGL)
+    pygame.display.set_caption("Pac-Man  –  Poda Alfa-Beta")
 
-    glMatrixMode(GL_MODELVIEW)
-    glLoadIdentity()
-    gluLookAt(EYE_X,EYE_Y,EYE_Z,CENTER_X,CENTER_Y,CENTER_Z,UP_X,UP_Y,UP_Z)
-    glClearColor(0,0,0,0)
+    glMatrixMode(GL_PROJECTION); glLoadIdentity()
+    gluPerspective(FOVY, W/H, ZNEAR, ZFAR)
+    glMatrixMode(GL_MODELVIEW);  glLoadIdentity()
+    _lookat()
+    glClearColor(0.04, 0.04, 0.08, 1)
     glEnable(GL_DEPTH_TEST)
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
-    #textures[0]: plano
-    Texturas(file_1)
-    #textures[1]: pacman
-    Texturas(img_pacman)
-    #textures[2]: fantasma1
-    Texturas(img_ghost1)
-    #textures[3]: fantasma2
-    Texturas(img_ghost2)
-    #textures[4]: fantasma3
-    Texturas(img_ghost3)
-    #textures[5]: fantasma4
-    Texturas(img_ghost4)
 
-    #se pasan las texturas a los objetos
-    pc.loadTextures(textures,1)
-    ghosts[0].loadTextures(textures,2)
-    ghosts[1].loadTextures(textures,3)
-    ghosts[2].loadTextures(textures,4)
-    ghosts[3].loadTextures(textures,5)
-    
-def PlanoTexturizado():
-    #Activate textures
-    glColor3f(1.0,1.0,1.0)
+    load_tex(f_map)          # 0
+    load_tex(f_pacman)       # 1
+    for f in f_ghost:        # 2..5
+        load_tex(f)
+
+    pc.loadTextures(textures, 1)
+    for i, g in enumerate(ghosts):
+        g.loadTextures(textures, i + 2)
+
+def _lookat():
+    ex = radius*(math.cos(math.radians(theta)) + math.sin(math.radians(theta))) + CENTER_X
+    ez = radius*(-math.sin(math.radians(theta)) + math.cos(math.radians(theta))) + CENTER_Z
+    glLoadIdentity()
+    gluLookAt(ex, EYE_Y, ez, CENTER_X, CENTER_Y, CENTER_Z, 0, 1, 0)
+
+# ──────────────────────────────────────────────────
+#  HUD  (pygame 2D sobre OpenGL, sin glDrawPixels)
+#  Se usa un pygame.Surface temporal y se dibuja
+#  como textura OpenGL  → rápido en Windows
+# ──────────────────────────────────────────────────
+_hud_tex_id = None
+
+def _init_hud_texture():
+    global _hud_tex_id
+    _hud_tex_id = int(glGenTextures(1))
+    glBindTexture(GL_TEXTURE_2D, _hud_tex_id)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+
+_hud_surf = None   # reutilizar para no re-allocar cada frame
+
+def render_hud(fps):
+    global _hud_surf
+    if _hud_tex_id is None:
+        return
+
+    # Dibujar texto sobre surface pygame
+    if _hud_surf is None:
+        _hud_surf = pygame.Surface((W, H), pygame.SRCALPHA)
+    _hud_surf.fill((0, 0, 0, 0))
+
+    y = 6
+    def line(txt, col=(200, 220, 255)):
+        nonlocal y
+        s = font.render(txt, True, col)
+        _hud_surf.blit(s, (8, y))
+        y += 17
+
+    line(f"FPS {fps:.0f}  |  WASD = Pacman   ←→ = camara   P = pausa   I = info   ESC = salir",
+         (180, 180, 255))
+
+    if show_info:
+        line("─" * 52, (80, 80, 120))
+        line("Blinky  (rojo)   ▸ movimiento ALEATORIO",         (255, 100, 100))
+        line("Pinky   (rosa)   ▸ ALFA-BETA individual",          (255, 160, 220))
+        line("Inky    (cian)   ▸ ALFA-BETA colaborativo (pinza)",(100, 230, 230))
+        line("Clyde   (naranja)▸ ALFA-BETA colaborativo (pinza)",(255, 160,  60))
+        line("─" * 52, (80, 80, 120))
+        line("Mejoras: Tabu horizonte 8  |  Greedy ordering  |  Quiescence +1", (160,200,160))
+
+    if paused:
+        s = font.render("  PAUSADO  (P para continuar)  ", True, (20, 20, 20),
+                        (240, 220, 60))
+        _hud_surf.blit(s, (W//2 - s.get_width()//2, H//2 - 12))
+
+    if flash > 0:
+        s = font.render("  PACMAN ATRAPADO!  ", True, (255, 255, 255), (180, 20, 20))
+        _hud_surf.blit(s, (W//2 - s.get_width()//2, H//2 + 20))
+
+    # Subir como textura OpenGL (flip vertical para OpenGL)
+    data = pygame.image.tostring(_hud_surf, "RGBA", True)
+    glBindTexture(GL_TEXTURE_2D, _hud_tex_id)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
+
+def blit_hud():
+    if _hud_tex_id is None:
+        return
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity()
+    glOrtho(0, W, 0, H, -1, 1)
+    glMatrixMode(GL_MODELVIEW);  glPushMatrix(); glLoadIdentity()
+
+    glDisable(GL_DEPTH_TEST)
+    glEnable(GL_BLEND);  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     glEnable(GL_TEXTURE_2D)
-    #front face
-    glBindTexture(GL_TEXTURE_2D, textures[0])    
+    glBindTexture(GL_TEXTURE_2D, _hud_tex_id)
+    glColor4f(1, 1, 1, 1)
     glBegin(GL_QUADS)
-    glTexCoord2f(0.0, 0.0)
-    glVertex3d(0, 0, 0)
-    glTexCoord2f(0.0, 1.0)
-    glVertex3d(0, 0, DimBoard)
-    glTexCoord2f(1.0, 1.0)
-    glVertex3d(DimBoard, 0, DimBoard)
-    glTexCoord2f(1.0, 0.0)
-    glVertex3d(DimBoard, 0, 0)
-    glEnd()              
+    glTexCoord2f(0,0); glVertex2f(0, 0)
+    glTexCoord2f(1,0); glVertex2f(W, 0)
+    glTexCoord2f(1,1); glVertex2f(W, H)
+    glTexCoord2f(0,1); glVertex2f(0, H)
+    glEnd()
+    glDisable(GL_TEXTURE_2D)
+    glDisable(GL_BLEND)
+    glEnable(GL_DEPTH_TEST)
+
+    glMatrixMode(GL_PROJECTION); glPopMatrix()
+    glMatrixMode(GL_MODELVIEW);  glPopMatrix()
+
+# ──────────────────────────────────────────────────
+#  COLISION
+# ──────────────────────────────────────────────────
+def check_collision():
+    THR = 14
+    for g in ghosts:
+        if (abs(g.position[0] - pc.position[0]) < THR and
+            abs(g.position[2] - pc.position[2]) < THR):
+            return True
+    return False
+
+def get_partner_mc(g):
+    if g.partner is None:
+        return None
+    qx = g.partner.XPxToMC[max(0, g.partner.position[0]-20)]
+    qy = g.partner.YPxToMC[max(0, g.partner.position[2]-20)]
+    return (qx, qy) if qx != -1 and qy != -1 else None
+
+# ──────────────────────────────────────────────────
+#  RENDER ESCENA
+# ──────────────────────────────────────────────────
+def draw_scene():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+    # Mapa
+    glColor3f(1, 1, 1)
+    glEnable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, textures[0])
+    glBegin(GL_QUADS)
+    glTexCoord2f(0,0); glVertex3d(0,0,0)
+    glTexCoord2f(0,1); glVertex3d(0,0,DimBoard)
+    glTexCoord2f(1,1); glVertex3d(DimBoard,0,DimBoard)
+    glTexCoord2f(1,0); glVertex3d(DimBoard,0,0)
+    glEnd()
     glDisable(GL_TEXTURE_2D)
 
-#Se mueve al observador circularmente al rededor del plano XZ a una altura fija (EYE_Y)
-def lookat():
-    global EYE_X
-    global EYE_Z
-    global radius
-    center = DimBoard / 2
-    EYE_X = radius * (math.cos(math.radians(theta)) + math.sin(math.radians(theta))) + center
-    EYE_Z = radius * (-math.sin(math.radians(theta)) + math.cos(math.radians(theta))) + center
-    glLoadIdentity()
-    gluLookAt(EYE_X,EYE_Y,EYE_Z,CENTER_X,CENTER_Y,CENTER_Z,UP_X,UP_Y,UP_Z)
-
-def display():
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    Axis()
-    PlanoTexturizado()
     pc.draw()
     for g in ghosts:
         g.draw()
-        g.update2(pc.position)
-    
-done = False
-Init()
-#finding(matrix, (xarray[0]-20,zarray[0]-20), (xarray[9]-20,zarray[9]-20))
-while not done:
-    for event in pygame.event.get():
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                done = True
-    
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_RIGHT]:
-        if theta > 359.0:
-            theta = 0
-        else:
-            theta += 1.0
-        lookat()
-    if keys[pygame.K_LEFT]:
-        if theta < 1.0:
-            theta = 360.0
-        else:
-            theta += -1.0
-        lookat()
-    #Se verifica la direccion para el pacman    
-    if keys[pygame.K_w]:
-        #direccion 0
-        pc.update(0)
-    elif keys[pygame.K_d]:
-        #direccion 1
-        pc.update(1)
-    elif keys[pygame.K_s]:
-        #direccion 2
-        pc.update(2)
-    elif keys[pygame.K_a]:
-        #direccion 1
-        pc.update(3)
-    else:
-        pc.update(-1)
 
-    display()
+# ──────────────────────────────────────────────────
+#  LOOP
+# ──────────────────────────────────────────────────
+init()
+_init_hud_texture()
+clock = pygame.time.Clock()
+done  = False
+
+while not done:
+    for ev in pygame.event.get():
+        if ev.type == QUIT:
+            done = True
+        if ev.type == KEYDOWN:
+            if ev.key == K_ESCAPE: done   = True
+            if ev.key == K_p:      paused = not paused
+            if ev.key == K_i:      show_info = not show_info
+
+    keys = pygame.key.get_pressed()
+
+    if keys[K_RIGHT]: theta = (theta + 1.0) % 360; _lookat()
+    if keys[K_LEFT]:  theta = (theta - 1.0) % 360; _lookat()
+
+    if not paused:
+        # Pacman
+        if   keys[K_w]: pc.update(0)
+        elif keys[K_d]: pc.update(1)
+        elif keys[K_s]: pc.update(2)
+        elif keys[K_a]: pc.update(3)
+        else:           pc.update(-1)
+
+        # Fantasmas cada 2 frames (velocidad razonable)
+        if frame % 2 == 0:
+            for g in ghosts:
+                pm = get_partner_mc(g) if g.tipo in (2, 3) else None
+                g.update2(pc.position, partner_mc=pm)
+
+        if check_collision():
+            flash = 45
+        if flash > 0:
+            flash -= 1
+
+    draw_scene()
+    render_hud(clock.get_fps())
+    blit_hud()
+
     pygame.display.flip()
-    pygame.time.wait(10)
+    clock.tick(60)
+    frame += 1
 
 pygame.quit()
-    
-

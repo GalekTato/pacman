@@ -1,178 +1,286 @@
-import pygame
-from pygame.locals import *
-
-# Cargamos las bibliotecas de OpenGL
-from OpenGL.GL import *
-from OpenGL.GLU import *
-from OpenGL.GLUT import *
+"""
+Ghost.py  –  4 fantasmas para Pac-Man con Poda Alfa-Beta
+==========================================================
+Blinky  (tipo 0) – rojo    – movimiento aleatorio
+Pinky   (tipo 1) – rosa    – alfa-beta individual
+Inky    (tipo 2) – cian    – alfa-beta colaborativo
+Clyde   (tipo 3) – naranja – alfa-beta colaborativo
+"""
 
 import math
-import os
-import numpy as np
-import pandas as pd
 import random
+from OpenGL.GL import *
+
+def manhattan(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+_OPTIONS = {
+    10: [1, 2],   11: [2, 3],   12: [0, 1],   13: [0, 3],
+    21: [1, 2, 3], 22: [0, 2, 3], 23: [0, 1, 3], 24: [0, 1, 2],
+    25: [0, 1, 2, 3], 26: [1], 27: [3],
+}
+_INV   = {0: 2, 1: 3, 2: 0, 3: 1}
+_DELTA = {0: (0, -1), 1: (1, 0), 2: (0, 1), 3: (-1, 0)}
+
 
 class Ghost:
-    def __init__(self,mapa, mc, x_mc, y_mc, xini, yini, dir, tipo):
-        #Matriz de control que almacena los IDs de las intersecciones
-        self.MC = mc
-        #Vectores que almacenan las coordenadas 
-        self.XPxToMC = x_mc
-        self.YPxToMC = y_mc
-        #se resplanda el mapa en terminos de pixeles
-        self.mapa = mapa
-        #se inicializa la posicion del fantasma en terminos de pixeles
-        self.position = []
-        self.position.append(xini)
-        self.position.append(1) #YPos
-        self.position.append(yini)
-        #se define el arreglo para la posicion en la matriz de control
-        self.positionMC = []
-        self.positionMC.append(self.XPxToMC[self.position[0] - 20]) #coord en x
-        self.positionMC.append(self.YPxToMC[self.position[2] - 20]) #coord en y
-        #se inicializa una direccion valida
-        self.direction = dir
-        #se almacena que tipo de fantasma sera:
-        #0: fantasma aleatorio
-        #1: fantasma con pathfinding
-        self.tipo = tipo
-        #arreglo para almacenar las opciones del fantasma
-        self.options = [
-            [1,2],
-            [2,3],
-            [0,1],
-            [0,3],
-            [1,2,3],
-            [0,2,3],
-            [0,1,3],
-            [0,1,2],
-            [0,1,2,3],
-            [1],
-            [3]
+    def __init__(self, mapa, mc, x_mc, y_mc, xini, yini, direction, tipo):
+        self.MC       = mc
+        self.XPxToMC  = x_mc
+        self.YPxToMC  = y_mc
+        self.mapa     = mapa
+        self.position = [xini, 1, yini]
+        self.positionMC = [
+            self.XPxToMC[self.position[0] - 20],
+            self.YPxToMC[self.position[2] - 20],
         ]
-        self.option = []
-        self.dir_inv = 0
-        
+        self.direction = direction
+        self.tipo      = tipo
+
+        _COLORS = {0: (1.0, 0.15, 0.15), 1: (1.0, 0.5, 0.85),
+                   2: (0.1, 0.9,  0.9),  3: (1.0, 0.6, 0.1)}
+        self.color = _COLORS.get(tipo, (1.0, 1.0, 1.0))
+
+        # Doble buffer de posicion para interpolacion suave
+        self.render_pos = [float(xini), 1.0, float(yini)]
+        self._prev_pos  = [float(xini), 1.0, float(yini)]
+        self._lerp_t    = 1.0
+
+        # Tabu global con horizonte limitado
+        self._tabu      = []
+        self._TABU_SIZE = 8
+
+        self.partner   = None
+        self.texturas  = None
+        self.Id        = 0
+
+    def set_partner(self, other):
+        self.partner = other
+
     def loadTextures(self, texturas, id):
         self.texturas = texturas
         self.Id = id
 
-    def drawFace(self, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4):
-        glBegin(GL_QUADS)
-        glTexCoord2f(0.0, 0.0)
-        glVertex3f(x1, y1, z1)
-        glTexCoord2f(0.0, 1.0)
-        glVertex3f(x2, y2, z2)
-        glTexCoord2f(1.0, 1.0)
-        glVertex3f(x3, y3, z3)
-        glTexCoord2f(1.0, 0.0)
-        glVertex3f(x4, y4, z4)
-        glEnd()
-   
-    def sigue_adelante(self):
-        #si el fantasma esta en un tunel, no es necesario calcular la siguiente posicion a traves del path
-        #solo se sigue la direccion actual y se aumenta el contador que accede a la posicion del path actual
-        if self.direction == 0: #up
-            self.position[2] -= 1
-        elif self.direction == 1: #right
-            self.position[0] += 1
-        elif self.direction == 2: #down
-            self.position[2] += 1
-        else: #left
-            self.position[0] -= 1
-        #se actualiza la variable de posicion sobre el path
-        if self.tipo == 1: #fantasma inteligente
-            self.path_n += 1
-        
-    def path_ia(self,pacmanXY):
-        # bloque para implementar la IA en los fantasmas
-        self.interseccion_random()            
-        
-    def interseccion_random(self):
-        #se determina en que tipo de celda esta el fantasma
-        self.positionMC[0] = self.XPxToMC[self.position[0] - 20]
-        self.positionMC[1] = self.YPxToMC[self.position[2] - 20]
-        celId = self.MC[self.positionMC[1]][self.positionMC[0]]
-        #a partir de la celda actual se generan sus opciones posibles
-        if celId == 0:
-            self.option = [self.direction]
-        elif celId == 10: #options = [1, 2]
-            self.option = self.options[0]
-        elif celId == 11: #options = [2, 3]
-            self.option = self.options[1]
-        elif celId == 12: #options = [0, 1]
-            self.option = self.options[2]
-        elif celId == 13: #options = [0, 3]
-            self.option = self.options[3]
-        elif celId == 21: #options = [1, 2, 3]
-            self.option = self.options[4]
-        elif celId == 22: #options = [0, 2, 3]
-            self.option = self.options[5]
-        elif celId == 23: #options = [0, 1, 3]
-            self.option = self.options[6]
-        elif celId == 24: #options = [0, 1, 2]
-            self.option = self.options[7]
-        elif celId == 25: #options = [0, 1, 2, 3]
-            self.option = self.options[8]
-        elif celId == 26: #options = [1]
-            self.option = self.options[9]
-        elif celId == 27: #options = [3]
-            self.option = self.options[10]
-        
-        #se calcula la direccion inversa a la actual
-        if self.direction == 0:
-            self.dir_inv = 2
-        elif self.direction == 1:
-            self.dir_inv = 3
-        elif self.direction == 2:
-            self.dir_inv = 0
-        else:
-            self.dir_inv = 1
+    # ------------------------------------------------------------------ movimiento base
+    def _apply_dir(self, d):
+        self._prev_pos = list(self.position)
+        dx, dz = _DELTA[d]
+        self.position[0] += dx
+        self.position[2] += dz
+        self.direction = d
+        self._lerp_t = 0.0
 
-        #se elimina la direccion invertida a la actual, evitando que el
-        #fantasma regrese por el camion por donde llego (rebote)
-        if (celId != 0) and (celId != 26) and (celId != 27):
-            self.option.remove(self.dir_inv)
-        
-        #se elige aleatoriamente una opcion entre las disponibles
-        size = len(self.option)
-        dir_rand = random.randint(0, size - 1)
-        
-        #se actualiza el vector de direccion y posicion del fantasma
-        self.direction = self.option[dir_rand]
-        
-        if self.direction == 0:
-            self.position[2] -= 1
-        elif self.direction == 1:
-            self.position[0] += 1
-        elif self.direction == 2:
-            self.position[2] += 1
-        elif self.direction == 3:
-            self.position[0] -= 1
-            
-        if (celId != 0) and (celId != 26) and (celId != 27):
-            self.option.append(self.dir_inv)    
-    
-    def update2(self,pacmanXY):
-        #si el fantasma se encuentra en una interseccion (valida o "falsa interseccion")
-        if ((self.YPxToMC[self.position[2] - 20] != -1) and 
-            (self.XPxToMC[self.position[0] - 20] != -1)):
-            if self.tipo == 1: #agente inteligente, se manda la posición del objetivo
-                self.path_ia(pacmanXY)
+    def _continue(self):
+        self._prev_pos = list(self.position)
+        dx, dz = _DELTA[self.direction]
+        self.position[0] += dx
+        self.position[2] += dz
+        self._lerp_t = 0.0
+
+    def _cell_options(self):
+        px = self.position[0] - 20
+        pz = self.position[2] - 20
+        if not (0 <= px < len(self.XPxToMC) and 0 <= pz < len(self.YPxToMC)):
+            return None, []
+        cx = self.XPxToMC[px];  cy = self.YPxToMC[pz]
+        if cx == -1 or cy == -1:
+            return None, []
+        self.positionMC[0] = cx;  self.positionMC[1] = cy
+        celId = self.MC[cy][cx]
+        if celId == 0:
+            return 0, []
+        opts = list(_OPTIONS.get(celId, []))
+        d_inv = _INV[self.direction]
+        if d_inv in opts and len(opts) > 1:
+            opts.remove(d_inv)
+        return celId, opts
+
+    # ------------------------------------------------------------------ Blinky aleatorio
+    def _move_random(self):
+        celId, opts = self._cell_options()
+        if celId is None or celId == 0 or not opts:
+            self._continue(); return
+        self._apply_dir(random.choice(opts))
+
+    # ------------------------------------------------------------------ funciones eval
+    def _eval_pinky(self, ghost_mc, _partner_mc, pacman_mc):
+        """
+        Componente 1: distancia Manhattan normalizada (0..1).
+        Componente 2: alineacion de eje (+0.25 si mismo row o col).
+        """
+        dist = manhattan(ghost_mc, pacman_mc)
+        c1   = 1.0 - min(dist / 13.0, 1.0)
+        c2   = 0.25 if (ghost_mc[0] == pacman_mc[0] or
+                        ghost_mc[1] == pacman_mc[1]) else 0.0
+        return c1 + c2
+
+    def _eval_collab(self, ghost_mc, partner_mc, pacman_mc):
+        """
+        Componente 1: distancia individual normalizada.
+        Componente 2: formacion de pinza (coseno opuesto = cerco perfecto).
+        Componente 3: separacion minima entre los dos fantasmas.
+        """
+        dist = manhattan(ghost_mc, pacman_mc)
+        c1   = 1.0 - min(dist / 13.0, 1.0)
+        if partner_mc is not None:
+            gx, gy = ghost_mc;  px, py = pacman_mc;  qx, qy = partner_mc
+            v1 = (px - gx, py - gy);  v2 = (px - qx, py - qy)
+            m1 = math.sqrt(v1[0]**2 + v1[1]**2) + 1e-9
+            m2 = math.sqrt(v2[0]**2 + v2[1]**2) + 1e-9
+            cos_a = (v1[0]*v2[0] + v1[1]*v2[1]) / (m1 * m2)
+            c2 = 0.35 * (-cos_a)
+            c3 = 0.15 * min(manhattan(ghost_mc, partner_mc) / 6.0, 1.0)
+        else:
+            c2 = c3 = 0.0
+        return c1 + c2 + c3
+
+    # ------------------------------------------------------------------ alfa-beta
+    def _get_dirs_mc(self, mc_pos, came_from):
+        cx, cy = mc_pos
+        if not (0 <= cx < len(self.MC[0]) and 0 <= cy < len(self.MC)):
+            return []
+        celId = self.MC[cy][cx]
+        opts  = list(_OPTIONS.get(celId, []))
+        if came_from != -1 and len(opts) > 1 and came_from in opts:
+            opts.remove(came_from)
+        return opts
+
+    def _sim(self, pos, d):
+        dx, dz = _DELTA[d]
+        return (pos[0] + dx, pos[1] + dz)
+
+    def alfa_beta(self, depth, alpha, beta, maximizing,
+                  ghost_mc, pacman_mc, partner_mc,
+                  came_from, branch_visited, eval_fn,
+                  quiescence_used=False):
+        """
+        Poda Alfa-Beta con:
+        1. Tabu de rama (branch_visited): evita ciclos dentro de la busqueda.
+        2. Busqueda ambiciosa: ordena movimientos por heuristica antes de expandir.
+        3. Continuacion heuristica: si dist<=3 y depth==0, extiende un nivel (una vez).
+        """
+        if ghost_mc in branch_visited:
+            return eval_fn(ghost_mc, partner_mc, pacman_mc)
+
+        dist = manhattan(ghost_mc, pacman_mc)
+        if depth <= 0:
+            if dist <= 3 and not quiescence_used:
+                depth = 1;  quiescence_used = True
             else:
-                self.interseccion_random()
-        else: #si no se encuentra en una interseccion o es falsa interseccion
-            self.sigue_adelante()
-        
+                return eval_fn(ghost_mc, partner_mc, pacman_mc)
+
+        dirs = self._get_dirs_mc(ghost_mc, came_from)
+        if not dirs:
+            return eval_fn(ghost_mc, partner_mc, pacman_mc)
+
+        # Busqueda ambiciosa: ordenar por heuristica descendente
+        dirs.sort(key=lambda d: -eval_fn(self._sim(ghost_mc, d), partner_mc, pacman_mc))
+
+        new_vis = branch_visited | {ghost_mc}
+
+        if maximizing:
+            val = -math.inf
+            for d in dirs:
+                child = self._sim(ghost_mc, d)
+                if not (0 <= child[0] < len(self.MC[0]) and 0 <= child[1] < len(self.MC)):
+                    continue
+                v = self.alfa_beta(depth-1, alpha, beta, False,
+                                   child, pacman_mc, partner_mc,
+                                   _INV[d], new_vis, eval_fn, quiescence_used)
+                val = max(val, v);  alpha = max(alpha, val)
+                if beta <= alpha: break
+            return val
+        else:
+            val = math.inf
+            for d in dirs:
+                child = self._sim(ghost_mc, d)
+                if not (0 <= child[0] < len(self.MC[0]) and 0 <= child[1] < len(self.MC)):
+                    continue
+                v = self.alfa_beta(depth-1, alpha, beta, True,
+                                   child, pacman_mc, partner_mc,
+                                   _INV[d], new_vis, eval_fn, quiescence_used)
+                val = min(val, v);  beta = min(beta, val)
+                if beta <= alpha: break
+            return val
+
+    def _best_dir_ab(self, depth, pacman_mc, partner_mc, eval_fn):
+        ghost_mc = tuple(self.positionMC)
+        inv_cur  = _INV.get(self.direction, -1)
+        dirs     = self._get_dirs_mc(ghost_mc, inv_cur)
+        if not dirs:
+            return self.direction
+
+        dirs.sort(key=lambda d: -eval_fn(self._sim(ghost_mc, d), partner_mc, pacman_mc))
+        best_val = -math.inf;  best_d = dirs[0]
+        root_vis = frozenset([ghost_mc])
+
+        for d in dirs:
+            child = self._sim(ghost_mc, d)
+            if not (0 <= child[0] < len(self.MC[0]) and 0 <= child[1] < len(self.MC)):
+                continue
+            v = self.alfa_beta(depth-1, -math.inf, math.inf, False,
+                               child, pacman_mc, partner_mc,
+                               _INV[d], root_vis | frozenset([child]),
+                               eval_fn, quiescence_used=False)
+            if v > best_val:
+                best_val = v;  best_d = d
+
+        # Actualizar tabu global
+        self._tabu.append(ghost_mc)
+        if len(self._tabu) > self._TABU_SIZE:
+            self._tabu.pop(0)
+        return best_d
+
+    # ------------------------------------------------------------------ movimientos IA
+    def _move_pinky(self, pacman_mc):
+        celId, opts = self._cell_options()
+        if celId is None or celId == 0 or not opts:
+            self._continue(); return
+        self._apply_dir(self._best_dir_ab(3, pacman_mc, None, self._eval_pinky))
+
+    def _move_collab(self, pacman_mc, partner_mc_coords):
+        celId, opts = self._cell_options()
+        if celId is None or celId == 0 or not opts:
+            self._continue(); return
+        self._apply_dir(self._best_dir_ab(3, pacman_mc, partner_mc_coords, self._eval_collab))
+
+    # ------------------------------------------------------------------ update principal
+    def update2(self, pacmanXY, partner_mc=None):
+        px = pacmanXY[0] - 20;  pz = pacmanXY[2] - 20
+        pac_cx = self.XPxToMC[px] if 0 <= px < len(self.XPxToMC) else -1
+        pac_cy = self.YPxToMC[pz] if 0 <= pz < len(self.YPxToMC) else -1
+        pacman_mc = (pac_cx, pac_cy)
+
+        gx = self.position[0] - 20;  gz = self.position[2] - 20
+        in_inter = (0 <= gx < len(self.XPxToMC) and 0 <= gz < len(self.YPxToMC) and
+                    self.XPxToMC[gx] != -1 and self.YPxToMC[gz] != -1)
+
+        if in_inter:
+            if   self.tipo == 0: self._move_random()
+            elif self.tipo == 1: self._move_pinky(pacman_mc)
+            else:                self._move_collab(pacman_mc, partner_mc)
+        else:
+            self._continue()
+
+        # Interpolacion suave (doble buffer)
+        self._lerp_t = min(self._lerp_t + 0.3, 1.0)
+        for i in (0, 2):
+            self.render_pos[i] = (self._prev_pos[i] * (1.0 - self._lerp_t) +
+                                  self.position[i] * self._lerp_t)
+
+    # ------------------------------------------------------------------ render
     def draw(self):
         glPushMatrix()
-        glColor3f(1.0, 1.0, 1.0)
-        glTranslatef(self.position[0], self.position[1], self.position[2])
-        glScaled(10,1,10)
-        #Activate textures
+        glColor3f(*self.color)
+        glTranslatef(self.render_pos[0], self.render_pos[1], self.render_pos[2])
+        glScaled(10, 1, 10)
         glEnable(GL_TEXTURE_2D)
-        #front face
         glBindTexture(GL_TEXTURE_2D, self.texturas[self.Id])
-        self.drawFace(-1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0)    
-        glDisable(GL_TEXTURE_2D)  
-        glPopMatrix()        
+        glBegin(GL_QUADS)
+        glTexCoord2f(0,0); glVertex3f(-1,1,-1)
+        glTexCoord2f(0,1); glVertex3f(-1,1, 1)
+        glTexCoord2f(1,1); glVertex3f( 1,1, 1)
+        glTexCoord2f(1,0); glVertex3f( 1,1,-1)
+        glEnd()
+        glDisable(GL_TEXTURE_2D)
+        glPopMatrix()
